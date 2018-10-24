@@ -1,0 +1,237 @@
+---
+title: "RNA-seq"
+author: "zhong"
+date: "2018年10月19日"
+output:
+  html_document: default
+  pdf_document: default
+---
+#**RNA-seq differential expression & pathway analysis **
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
+# options("repos" = c(CRAN="https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+# install.packages("devtools",
+#                repos="https://mirrors.tuna.tsinghua.edu.cn/CRAN/")
+# library(devtools) 
+# source("https://bioconductor.org/biocLite.R") 
+# options(BioC_mirror="https://mirrors.ustc.edu.cn/bioc/")  
+# BiocInstaller::biocLite(c('airway','DESeq2','edgeR','limma'))
+# BiocInstaller::biocLite(c('ChIPpeakAnno','ChIPseeker'))
+# 
+
+library('AnnotationDbi')
+library('org.Mm.eg.db')
+library('DESeq2')
+library('pheatmap')
+library("RColorBrewer")
+library("ggplot2")
+library(dplyr)
+library("pathview")
+library("gage")
+library("gageData")
+library(clusterProfiler)
+library(DOSE)
+library(org.Mm.eg.db)
+library(stringr)
+library(ggplot2)
+
+```
+
+
+
+
+##Setting ggplot2 theme
+```{r, echo=TRUE}
+library(magrittr) # for R's pipe operator %>%
+# theme for ggplot2
+theme_set(theme_bw())
+pal = "Set1"
+scale_colour_discrete <- function(palname = pal, ...) {
+  scale_colour_brewer(palette = palname, ...)
+}
+scale_fill_discrete <- function(palname = pal, ...) {
+  scale_fill_brewer(palette = palname, ...)
+}
+set.seed(2016)
+main_theme = theme(panel.background=element_blank(),
+                    panel.grid=element_blank(),
+                    axis.line.x=element_line(size=.5, colour="black"),
+                    axis.line.y=element_line(size=.5, colour="black"),
+                    axis.ticks=element_line(color="black"),
+                    axis.text=element_text(color="black", size=7),
+                    legend.position="right",
+                    legend.background=element_blank(),
+                    legend.key=element_blank(),
+                    legend.text= element_text(size=7),
+                    text=element_text(family="sans", size=7))
+```
+
+##Loading count matrix 
+```{r, warning=FALSE}
+directory='/media/D/16s/16/2018.10.15'
+setwd(directory)
+countData<-read.table('merge.tsv',header = T,stringsAsFactors = F,sep = "\t",row.names = 1)
+colData=read.table('map.txt',header = T,stringsAsFactors = F,sep = "\t")
+rownames(colData)=colData[,1]
+all(rownames(colData) %in% colnames(countData))
+countData <- countData[, rownames(colData)]
+all(rownames(colData) == colnames(countData))
+dds <- DESeqDataSetFromMatrix(countData = countData,
+                              colData = colData,
+                              design = ~ condition)
+head(assay(dds))
+
+dds <- dds[ rowSums(counts(dds)) > 3, ]
+ddsTC=DESeq(dds,parallel = TRUE)
+sizeFactors(ddsTC)
+res = results(ddsTC, contrast=c("condition", "WT", "KO"))
+res=res[order(res$padj),]
+summary(res)
+table(res$padj<0.05)
+plotMA(res, main="DESeq2", ylim=c(-2,2))
+```
+
+## Annotate Gene Symbol
+
+```{r, warning=FALSE}
+res$symbol <- mapIds(org.Mm.eg.db,
+                     keys=row.names(res),
+                     column="SYMBOL",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+resFilter <- res[which(res$pvalue<0.1 & abs(res$log2FoldChange) > 1),]   #筛选表达差异较大的基因
+resFilter <- resFilter[order(resFilter$padj),]  #根据padj进行排序  
+head(resFilter[order(resFilter$log2FoldChange,-resFilter$baseMean), ] )  #最强下调
+head( resFilter[ order( -resFilter$log2FoldChange, -resFilter$baseMean ), ] ) #最强上调
+##write.csv(resFilter,file='results_filter.csv')
+```
+
+
+##分析样品间差异
+```{r, echo=TRUE}
+rld=rlog(ddsTC,blind=FALSE)
+sampleDists <- dist(t(assay(rld)))
+sampleDistMatrix <- as.matrix(sampleDists)
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+rownames(sampleDistMatrix)=rownames(colData)
+colnames(sampleDistMatrix)=rownames(colData)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+```
+
+
+##主成分分析
+```{r, echo=TRUE}
+data <- plotPCA(rld, returnData=TRUE)
+percentVar <- round(100 * attr(data, "percentVar"))
+ggplot(data, aes(PC1, PC2, color=condition)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  coord_fixed()+labs(title="Principal Component Analysis Plot")
+
+```
+
+
+
+###查看某一个感兴趣的gene在组间的差别
+```{r, echo=TRUE}
+#plotCounts(ddsTC, gene="ENSMUSG00000024045", intgroup="condition", returnData=TRUE) %>% ggplot(aes(condition, count)) + geom_boxplot(aes(fill=condition)) + scale_y_log10() + ggtitle("selected gene")
+
+```
+
+##heatmap
+```{r, echo=TRUE}
+select=rownames(resFilter)[1:40]
+ntd <- normTransform(ddsTC)
+df <- as.data.frame(colData(ddsTC)[,c("condition","sizeFactor")])
+pheatmap(assay(ntd)[select,], cluster_rows=FALSE, show_rownames=TRUE,
+         cluster_cols=TRUE, annotation_col=df)
+```
+
+##火山图
+```{r eval=FALSE, include=FALSE}
+data=as.data.frame(res)
+data$color <- ifelse(data$padj<0.05 & abs(data$log2FoldChange)>= 1,ifelse(data$log2FoldChange > 1,'red','blue'),'gray')
+color=c(red='#FD9145',blue='#03AFD8',gray='#BFE166')
+ggplot(data, aes(log2FoldChange, -log10(padj), color = data$color)) +
+  geom_point() +scale_color_manual(values = data$color) +
+  labs(x="log2 (fold change)",y="-log10 (q-value)") +
+  geom_hline(yintercept = -log10(0.05), lty=4,col="grey",lwd=0.6) +
+  geom_vline(xintercept = c(-1, 1), lty=4,col="grey",lwd=0.6) +
+  theme(legend.position = "none",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14))
+
+
+```
+
+
+##功能富集分析
+```{r eval=FALSE, warning=FALSE, include=FALSE}
+gene<-rownames(resFilter)
+gene.df<-bitr(gene, fromType = "ENSEMBL", 
+              toType = c("SYMBOL","ENTREZID"),
+              OrgDb = org.Mm.eg.db)
+
+#Go enrichment
+ego_bp<-enrichGO(gene       = gene.df$ENSEMBL,
+                 OrgDb      = org.Mm.eg.db,
+                 keyType    = 'ENSEMBL',
+                 ont        = "BP",
+                 pAdjustMethod = "BH",
+                 pvalueCutoff = 0.01,
+                 qvalueCutoff = 0.05)
+barplot(ego_bp,showCategory = 18,title="The GO_BP enrichment analysis of all DEGs ")+ 
+  scale_size(range=c(2, 12))+
+  scale_x_discrete(labels=function(ego_bp) str_wrap(ego_bp,width = 25))
+
+kk<-enrichKEGG(gene      =gene.df$ENTREZID,
+               organism = 'mmu',
+               pvalueCutoff = 0.05)
+
+barplot(kk,showCategory = 25, title="The KEGG enrichment analysis of all DEGs")+
+    scale_size(range=c(2, 12))+
+    scale_x_discrete(labels=function(kk) str_wrap(kk,width = 25))
+dotplot(kk,showCategory = 25, title="The KEGG enrichment analysis of all DEGs")+
+    scale_size(range=c(2, 12))+
+    scale_x_discrete(labels=function(kk) str_wrap(kk,width = 25))
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+data("kegg.sets.mm")
+data("sigmet.idx.mm")
+kegg.sets.mm = kegg.sets.mm[sigmet.idx.mm]
+foldchanges = resFilter$log2FoldChange
+names(foldchanges)= gene.df$ENTREZID
+keggres = gage(foldchanges, gsets = kegg.sets.mm, same.dir = TRUE)# Look at both up (greater), down (less), and statatistics.
+
+lapply(keggres, head)
+
+
+keggrespathways = data.frame(id=rownames(keggres$greater), keggres$greater) %>% 
+  tbl_df() %>% 
+  filter(row_number()<=10) %>% 
+  .$id %>% 
+  as.character()
+keggrespathways
+keggresids = substr(keggrespathways, start=1, stop=8)
+# Get the IDs.
+keggresids
+
+#定义画图函数
+plot_pathway = function(pid) pathview(gene.data=foldchanges, pathway.id=pid, species="mmu", new.signature=FALSE)
+detach("package:pathview", unload=TRUE)
+detach("package:dplyr", unload=TRUE)
+library(pathview)
+tmp = sapply(keggresids, function(pid) pathview(gene.data=foldchanges, pathway.id=pid, species="mmu"))
+
+
+```
+
+
