@@ -1,0 +1,831 @@
+---
+title: "16s-plot"
+author: "zhong"
+date: "2018年3月25日"
+output: html_document
+---
+
+
+
+##Load and install the required packages.
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+.cran_packages <-   c("knitr", "phyloseqGraphTest", "phyloseq", "shiny","miniUI", "caret", "pls", "e1071", "ggplot2", "randomForest","vegan", "plyr", "dplyr", "ggrepel", "nlme","reshape2","devtools", "PMA", "structSSI", "ade4","igraph", "ggnetwork", "intergraph", "scales") 
+.github_packages <- c("jfukuyama/phyloseqGraphTest") 
+.bioc_packages <- c("phyloseq", "genefilter", "impute","VennDiagram","dada2") 
+
+# Install CRAN packages (if not already installed)
+.inst <- .cran_packages %in% installed.packages() 
+if (any(!.inst)){
+  install.packages(.cran_packages[!.inst],repos = "http://cran.rstudio.com/")
+}
+.inst <- .github_packages %in% installed.packages()
+if (any(!.inst)){
+  devtools::install_github(.github_packages[!.inst])}
+.inst <- .bioc_packages %in% installed.packages()
+if (any(!.inst)){
+  source("http://bioconductor.org/biocLite.R")
+  biocLite(.bioc_packages[!.inst])
+}
+# Load the required packages.
+reqpkg = c( "phyloseq", "DESeq2","plyr", "reshape2", "ggplot2", "gridExtra","grid","VennDiagram","dada2","ade4","DECIPHER","dplyr", "phangorn","structSSI")
+
+for (i in reqpkg) {
+  print(i)
+  library(i, quietly = TRUE, verbose = FALSE, warn.conflicts = FALSE, character.only = TRUE)
+  packageVersion(i)
+}
+
+```
+
+##Set  the theme for ggplot2
+```{r, echo=TRUE}
+library(magrittr) # for R's pipe operator %>%
+# theme for ggplot2
+theme_set(theme_bw())
+pal = "Set1"
+scale_colour_discrete <- function(palname = pal, ...) {
+  scale_colour_brewer(palette = palname, ...)
+}
+scale_fill_discrete <- function(palname = pal, ...) {
+  scale_fill_brewer(palette = palname, ...)
+}
+set.seed(2016)
+main_theme = theme(panel.background=element_blank(),
+                    panel.grid=element_blank(),
+                    axis.line.x=element_line(size=.5, colour="black"),
+                    axis.line.y=element_line(size=.5, colour="black"),
+                    axis.ticks=element_line(color="black"),
+                    axis.text=element_text(color="black", size=7),
+                    legend.position="right",
+                    legend.background=element_blank(),
+                    legend.key=element_blank(),
+                    legend.text= element_text(size=7),
+                    text=element_text(family="sans", size=7))
+```
+
+##Step1. importint biom and tree from output of Vsearch and Qiime
+```{r, echo=TRUE, warning=FALSE}
+setwd('/media/D/16s/16/2018.3.25')
+
+#otu_table=read.table('otu.txt',header = T,stringsAsFactors = F,sep = "\t")
+phyloseq_obj= import_biom('otu_table4.biom','rep_seqs.tree')
+map_file=import_qiime_sample_data('map.txt')
+sample_data(phyloseq_obj)=map_file
+colnames(tax_table(phyloseq_obj))=c("Kingdom","Phylum","Class","Order","Family","Genus","Species")
+table(tax_table(phyloseq_obj)[, "Phylum"], exclude = NULL) 
+
+
+
+#if using qiime2 data ,split otutable and tax table,import them one ye one
+#tax=read.table("tax.txt",header = T,stringsAsFactors = F,sep = "\t",row.names = 1)
+#otu_table=read.table('otu.txt',header = T,stringsAsFactors = F,sep = "\t")
+#OTU = otu_table(otu_table, taxa_are_rows = TRUE)
+#tax=as.matrix(tax)
+#TAX = tax_table(tax)
+#physeq = phyloseq(OTU, TAX)
+#sampledata = sample_data(sampleData)
+#a=import_qiime("tree.nwk")
+#phyloseq_obj=merge_phyloseq(physeq,sample,a)
+```
+
+
+
+```{r, echo=TRUE,}
+ps0 <- subset_taxa(phyloseq_obj, !is.na(Phylum) & !Phylum %in% c("", "uncharacterized"))
+# Compute prevalence of each feature, store as data.frame 
+prevdf = apply(X = otu_table(ps0),MARGIN = ifelse(taxa_are_rows(ps0), yes = 1, no = 2),FUN = function(x){sum(x > 0)}) 
+# Add taxonomy and total read counts to this data.frame 
+prevdf = data.frame(Prevalence = prevdf,TotalAbundance = taxa_sums(ps0),tax_table(ps0))
+# prevdf2=prevdf[which(prevdf$Prevalence>4),]
+
+#Compute the total and average prevalences of the features in each phylum. 
+plyr::ddply(prevdf, "Phylum", function(df1){cbind(mean(df1$Prevalence),sum(df1$Prevalence))})
+# Define phyla to filter 
+filterPhyla = c("p__WS3", "p__Synergistetes","p__[Thermi]","p__Chlamydiae","p__Chlorobi","p__Verrucomicrobia","p__TM7") filterPhyla = c
+# Filter entries with unidentified Phylum. 
+ps1 = subset_taxa(ps0, !Phylum %in% filterPhyla);ps1
+# Subset to the remaining phyla
+prevdf1 = subset(prevdf, Phylum %in% get_taxa_unique(ps1, "Phylum"))
+ggplot(prevdf1, aes(TotalAbundance, Prevalence / nsamples(ps0),color=Phylum))+
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) + geom_point(size = 2, alpha = 0.7)+
+  scale_x_log10() +  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap( ~ Phylum) + theme(legend.position="none")
+#  Define prevalence threshold as 5% of total samples 
+prevalenceThreshold = 0.05 * nsamples(ps0) ;prevalenceThreshold 
+# Execute prevalence filter, using `prune_taxa()` function   
+#fsr=transform_sample_counts(ps1,function(x) x/sum(x))
+#ps2=filter_taxa(fsr,function(x)sum(x)>0.00005,TRUE)     
+#??????
+keepTaxa = rownames(prevdf1)[(prevdf1$Prevalence >= prevalenceThreshold)]
+ps2 = prune_taxa(keepTaxa, ps0)
+
+pdf('phyloseq.pdf')
+
+
+# How many genera would be present after filtering? 
+length(get_taxa_unique(ps2, taxonomic.rank = "Genus")) 
+# ps3 = tax_glom(ps2, "Genus", NArm = TRUE) 
+# 
+# h1 = 0.4 
+# ps4 = tip_glom(ps3, h = h1)
+# p2tree = plot_tree(ps2, method = "treeonly",ladderize = "left",title = "Before Agglomeration") +theme(plot.title = element_text(size = multiPlotTitleTextSize)) 
+# p3tree = plot_tree(ps3, method = "treeonly",ladderize = "left", title = "By Genus") +theme(plot.title = element_text(size = multiPlotTitleTextSize)) 
+# p4tree = plot_tree(ps4, method = "treeonly",ladderize = "left", title = "By Height") +theme(plot.title = element_text(size = multiPlotTitleTextSize)) 
+# group plots together
+# grid.arrange(nrow = 1, p2tree, p3tree, p4tree)
+
+
+
+#Abundance value transformation 可以更改对比的项目比如 Description Location Enviroment  
+plot_abundance = function(physeq,title = "",
+                          Facet = "Order", Color = "Phylum"){
+  # Arbitrary subset, based on Phylum, for plotting
+  p1f = subset_taxa(physeq, Phylum %in% c("p__Proteobacteria"))
+  mphyseq = psmelt(p1f)
+  mphyseq <- subset(mphyseq, Abundance > 0)
+  ggplot(data = mphyseq, mapping = aes_string(x = "Description",y = "Abundance",
+                                              color = Color, fill = Color)) +
+    geom_violin(fill = NA) +
+    geom_point(size = 1, alpha = 0.3,
+               position = position_jitter(width = 0.3)) +
+    facet_wrap(facets = Facet) + scale_y_log10()+
+    theme(legend.position="none") 
+}
+plot_abundance_all = function(physeq,title = "",
+                          Facet = "Order", Color = "Phylum"){
+  # Arbitrary subset, based on Phylum, for plotting
+#  p1f = subset_taxa(physeq, Phylum %in% c("p__Firmicutes"))
+#  mphyseq = psmelt(p1f)
+  mphyseq = psmelt(physeq)
+  mphyseq <- subset(mphyseq, Abundance > 0)
+  ggplot(data = mphyseq, mapping = aes_string(x = "Description",y = "Abundance",
+                                              color = Color, fill = Color)) +
+    geom_violin(fill = NA) +
+    geom_point(size = 1, alpha = 0.3,
+               position = position_jitter(width = 0.3)) +
+    facet_wrap(facets = Facet) + scale_y_log10()+
+    theme(legend.position="none") 
+}
+
+ plot_abundance(ps2, Facet = "Class", Color = 'Location')
+ plot_abundance(ps2, Facet = "Order", Color = 'Location')
+ plot_abundance(ps2, Facet = "Family", Color = 'Location')
+ plot_abundance(ps2, Facet = "Genus", Color = 'Location')
+ 
+plot_bar(physeq, fill = "Family")
+plot_richness(ps, x="Location", color="Description")
+plot_heatmap(physeq1, taxa.label="Phylum")
+#eg plot_abundance(ps2,Facet = "Family", Color = NULL)
+
+#plot-abundance按照函数中的门的下属分类画分布
+
+# Transform to relative abundance. Save as new object.  
+# ps3ra = transform_sample_counts(ps2, function(x){x / sum(x)})
+# plotBefore = plot_abundance(ps2,"")
+# plotAfter = plot_abundance(ps2ra,"")
+# Combine each plot into one graphic. 
+# grid.arrange(nrow = 2, plotBefore, plotAfter)
+
+
+
+
+qplot(log10(rowSums(otu_table(ps)))) +xlab("Logged counts-per-sample")
+
+#An ordination on the logged abundance data reveals a few outliers
+pslog <- transform_sample_counts(ps2, function(x) log(1 + x)) 
+out.wuf.log <- ordinate(pslog, method = "MDS", distance = "wunifrac")
+evals <- out.wuf.log$values$Eigenvalues 
+plot_ordination(pslog, out.wuf.log, color = "Location") +labs(col = "Location Status") +coord_fixed(sqrt(evals[2] / evals[1])) 
+
+rel_abund <- t(apply(otu_table(ps2), 1, function(x) x / sum(x)))
+qplot(rel_abund[, 12], geom = "histogram",bins=30) +xlab("Relative abundance") 
+
+# size too large to calcucate
+out.bc.log <- ordinate(pslog, method = "MDS", distance = "bray") 
+out.dpcoa.log <- ordinate(pslog, method = "DPCoA")
+evals <- out.dpcoa.log$eig 
+
+plot_ordination(pslog, out.dpcoa.log, color = "Location",shape = "Description") +coord_fixed(sqrt(evals[2] / evals[1])) +labs(col = "Location Status", shape = "Description") 
+
+evals <- out.bc.log$values$Eigenvalues 
+plot_ordination(pslog, out.bc.log, color = "Location",shape = "Description") +coord_fixed(sqrt(evals[2] / evals[1])) +labs(col = "Location", shape = "Description")
+
+out.wuf.log <- ordinate(pslog, method = "PCoA", distance ="wunifrac") 
+evals <- out.wuf.log$values$Eigenvalues
+
+
+#PCA on ranks
+evals <- out.dpcoa.log$eig 
+plot_ordination(pslog, out.dpcoa.log, type = "species", color = "Phylum") +coord_fixed(sqrt(evals[2] / evals[1]))
+evals <- out.wuf.log$values$Eigenvalues 
+plot_ordination(pslog, out.wuf.log, color = "Location",shape = "Description") +coord_fixed(sqrt(evals[2] / evals[1])) +labs(col = "Location Status", shape = "Description") 
+plot_ordination(pslog, out.wuf.log, type = "species", color = "Phylum") +coord_fixed(sqrt(evals[2] / evals[1])) 
+abund <- otu_table(pslog) 
+abund_ranks <- t(apply(abund, 1, rank)) 
+abund_ranks <- abund_ranks - 329
+abund_ranks[abund_ranks < 1] <- 1
+ranks_pca <- dudi.pca(abund_ranks, scannf = F, nf = 3)
+row_scores <- data.frame(li = ranks_pca$li,SampleID = rownames(abund_ranks))
+col_scores <- data.frame(co = ranks_pca$co,seq = colnames(abund_ranks))
+tax <- tax_table(ps2)@.Data %>%data.frame(stringsAsFactors = FALSE)
+tax$seq <- rownames(tax)
+
+
+
+#DESeq2
+ps_dds <- phyloseq_to_deseq2(ps2, ~ Location) 
+varianceStabilizingTransformation(ps_dds, blind = TRUE, fitType = "parametric") 
+ps_dds <- estimateSizeFactors(ps_dds) 
+ps_dds <- estimateDispersions(ps_dds) 
+abund <- getVarianceStabilizedData(ps_dds) 
+#short_names <- substr(rownames(abund), 1, 5)%>%make.names(unique = TRUE) 
+#rownames(abund) <- short_names 
+el <- phy_tree(pslog)$edge
+el0 <- el 
+el0 <- el0[nrow(el):1, ] 
+el_names <- c(rownames(abund), seq_len(phy_tree(pslog)$Nnode)) 
+el[, 1] <- el_names[el0[, 1]] 
+el[, 2] <- el_names[as.numeric(el0[, 2])] 
+unadj_p <- treePValues(el, abund, sample_data(pslog)$Location)
+hfdr_res <- hFDR.adjust(unadj_p, el, .75) 
+summary(hfdr_res)
+abund_sums <- rbind(data.frame(sum = colSums(abund),
+                               sample = colnames(abund),
+                               type = "DESeq2"),
+                    data.frame(sum = rowSums(otu_table(pslog)),
+                               sample = colnames(otu_table(pslog)),
+                               type = "log(1 + x)"))
+ggplot(abund_sums) +
+  geom_histogram(aes(x = sum), binwidth = 20) +
+  facet_grid(type ~ .) +
+  xlab("Total abundance within sample") 
+```
+
+
+
+##DESeq2
+```{r, echo=TRUE}
+library('DESeq2')
+library('pheatmap')
+library("RColorBrewer")
+library("ggplot2")
+library(ggbiplot)
+design=sample_data(ps2)
+idx = rownames(design) %in% colnames(otu_table)
+sub_design = design[idx,]
+count = otu_table[, rownames(sub_design)]
+otu.pca <- prcomp(t(count), scale. = TRUE)
+ggbiplot(otu.pca, obs.scale = 1, var.scale = 1,
+         groups = sub_design$genotype, ellipse = TRUE,var.axes = F)
+# 转换原始数据为百分比
+norm = t(t(count)/colSums(count,na=T)) * 100 # normalization to total 100
+# 另一种方法：按mad值排序取前6波动最大的OTUs
+mad.5 = head(norm[order(apply(norm,1,mad), decreasing=T),],n=6)
+# 计算PCA和菌与菌轴的相关性
+otu.pca <- prcomp(t(mad.5))
+ggbiplot(otu.pca, obs.scale = 1, var.scale = 1,groups = sub_design$Description, ellipse = TRUE,var.axes = T,varname.abbrev = TRUE,varname.adjust =2)
+
+library(ggvegan)
+otu.tab <- read.csv("otutab.txt", row.names = 1, header=T, sep="\t")
+env.data <- read.csv("new_meta.txt", row.names = 1, fill = T, header=T, sep="\t")
+#transform data
+otu <- t(otu.tab)
+#data normolization (Legendre and Gallagher,2001)
+##by log
+env.data.log <- log1p(env.data)##
+##delete NA
+env <- na.omit(env.data.log)
+
+###hellinger transform
+otu.hell <- decostand(otu, "hellinger")
+
+#DCA analysis  
+sel <- decorana(otu.hell)
+sel
+
+otu.tab.0 <- rda(otu.hell ~ 1, env) #no variables
+#Axis 第一项大于四应该用CCA分析
+otu.tab.1<- rda(otu.hell ~ ., env)
+#我们在筛选完RDA和CCA分析后，我们需要对所有环境因子进行共线性分析，利用方差膨胀因子分析
+vif.cca(otu.tab.1)
+#删除掉共线性的环境因子，删掉最大的变量，直到所有的变量都小于10
+otu.tab.1 <- rda(otu.hell ~ N+P+K+Ca+Mg+pH+Al+Fe+Mn+Zn+Mo, env.data.log)
+
+vif.cca(otu.tab.1)
+#进一步筛选
+otu.tab.1 <- rda(otu.hell ~ N+P+K+Mg+pH+Al+Fe+Mn+Zn+Mo, env.data.log)
+vif.cca(otu.tab.1)
+#test again
+otu.tab.1 <- rda(otu.hell ~ N+P+K+Mg+pH+Fe+Mn+Zn+Mo, env.data.log)
+
+#方差膨胀因子分析,目前所有变量都已经小于10
+vif.cca(otu.tab.1)
+##用step模型检测最低AIC值
+mod.u <- step(otu.tab.0, scope = formula(otu.tab.1), test = "perm")# "perm"增加P值等参数
+mod.d <- step(otu.tab.0, scope = (list(lower = formula(otu.tab.0), upper = formula(otu.tab.1))))
+mod.d
+##本处筛选的结果，找到一个Mg环境因子适合模型构建，为了下一步画图，我们
+#保留所有非共线性的环境因子
+#choose variables for best model and rda analysis again#
+(otu.rda.f <- rda(otu.hell ~ N+P+K+Mg+pH+Fe+Mn+Zn+Mo, env))
+
+anova(otu.rda.f)
+anova(otu.rda.f, by = "term")
+anova(otu.rda.f, by = "axis")
+#计算db-rda
+## 用ggvegan绘图
+p<- autoplot(otu.rda.f, arrows = TRUE,axes = c(1, 2), geom =  c("point", "text"), layers = c( "species","sites", "biplot", "centroids"), legend.position = "right", title = "db-RDA")
+## 添加图层
+p + theme_bw()+theme(panel.grid=element_blank())
+```
+
+
+##Here is a bar plot showing the log2-fold-change, showing Genus and Phylum. Uses some ggplot2 commands.
+```{r, echo=TRUE}
+
+
+library("ggplot2")
+
+sigtabgen = subset(sigtab, !is.na(Genus))
+# Phylum order
+x = tapply(sigtabgen$log2FoldChange, sigtabgen$Phylum, function(x) max(x))
+x = sort(x, TRUE)
+sigtabgen$Phylum = factor(as.character(sigtabgen$Phylum), levels=names(x))
+# Genus order
+x = tapply(sigtabgen$log2FoldChange, sigtabgen$Genus, function(x) max(x))
+x = sort(x, TRUE)
+sigtabgen$Genus = factor(as.character(sigtabgen$Genus), levels=names(x))
+ggplot(sigtabgen, aes(y=Genus, x=log2FoldChange, color=Phylum)) + 
+  geom_vline(xintercept = 0.0, color = "gray", size = 0.5) +
+  geom_point(size=6) + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5))
+```
+
+
+##Bar Plot
+```{r, echo=TRUE,}
+top20 <- names(sort(taxa_sums(ps), decreasing=TRUE))[1:20]
+ps.top20 <- transform_sample_counts(ps, function(OTU) OTU/sum(OTU))
+ps.top20 <- prune_taxa(top20, ps.top20)
+plot_bar(ps.top20, x="Day", fill="Family") + facet_wrap(~When, scales="free_x")
+plot_bar(ps2,x="Location",fill="Class",facet_grid = ~Description)
+```
+
+
+##Example using Negative Binomial in Microbiome Differential Abundance Testing
+```{r, echo=TRUE}
+kostic=ps2
+kostic <- prune_samples(sample_sums(kostic) > 500, kostic)
+
+
+diagdds = phyloseq_to_deseq2(kostic, ~ Description+Location)
+# calculate geometric means prior to estimate size factors
+gm_mean = function(x, na.rm=TRUE){
+  exp(sum(log(x[x > 0]), na.rm=na.rm) / length(x))
+}
+geoMeans = apply(counts(diagdds), 1, gm_mean)
+diagdds = estimateSizeFactors(diagdds, geoMeans = geoMeans)
+diagdds = DESeq(diagdds, fitType="local")
+##Investigate test results table
+res = results(diagdds,contrast = c("Description","AM","AMN1"))
+res = res[order(res$padj, na.last=NA), ]
+alpha = 0.05
+sigtab = res[(res$padj < alpha), ]
+sigtab
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(kostic)[rownames(sigtab), ], "matrix"))
+theme_set(theme_bw())
+sigtabgen = subset(sigtab, !is.na(Genus))
+# Phylum order
+x = tapply(sigtabgen$log2FoldChange, sigtabgen$Phylum, function(x) max(x))
+x = sort(x, TRUE)
+sigtabgen$Phylum = factor(as.character(sigtabgen$Phylum), levels=names(x))
+# Genus order
+x = tapply(sigtabgen$log2FoldChange, sigtabgen$Genus, function(x) max(x))
+x = sort(x, TRUE)
+sigtabgen$Genus = factor(as.character(sigtabgen$Genus), levels=names(x))
+ggplot(sigtabgen, aes(y=Genus, x=log2FoldChange, color=Phylum)) + 
+  geom_vline(xintercept = 0.0, color = "gray", size = 0.5) +
+  geom_point(size=6) + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5))
+
+
+
+```
+
+
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+library('shiny')
+
+shiny::runGitHub("shiny-phyloseq","joey711")
+```
+
+## ggbiplot
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+library('ggbiplot')
+# 最简单帅气的例子
+data(wine)
+wine.pca <- prcomp(wine, scale. = TRUE)
+# 演示样式
+ggbiplot(wine.pca, obs.scale = 1, var.scale = 1,
+         groups = wine.class, ellipse = TRUE, circle = TRUE) +
+  scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+
+# 菌群数据实战
+# 读入实验设计
+design = read.table("design.txt", header=T, row.names= 1, sep="\t") 
+
+# 读取OTU表
+otu_table = read.delim("otu_table.txt", row.names= 1,  header=T, sep="\t")
+
+# 过滤数据并排序
+idx = rownames(design) %in% colnames(otu_table) 
+sub_design = design[idx,]
+count = otu_table[, rownames(sub_design)]
+
+# 基于OTU表PCA分析
+otu.pca <- prcomp(t(count), scale. = TRUE)
+
+# 绘制PCA图，并按组添加椭圆
+ggbiplot(otu.pca, obs.scale = 1, var.scale = 1,
+         groups = sub_design$genotype, ellipse = TRUE,var.axes = F)
+
+# 显著高丰度菌的影响
+
+# 转换原始数据为百分比
+norm = t(t(count)/colSums(count,na=T)) * 100 # normalization to total 100
+
+# 筛选mad值大于0.5的OTU
+mad.5 = norm[apply(norm,1,mad)>0.5,]
+# 另一种方法：按mad值排序取前6波动最大的OTUs
+mad.5 = head(norm[order(apply(norm,1,mad), decreasing=T),],n=6)
+# 计算PCA和菌与菌轴的相关性
+otu.pca <- prcomp(t(mad.5))
+ggbiplot(otu.pca, obs.scale = 1, var.scale = 1,
+         groups = sub_design$genotype, ellipse = TRUE,var.axes = T)
+
+
+##anosim
+
+#将数据进行分组，下例为前5组为一个处理，后5组为另一个处理
+group=c(1,1,1,1,1,2,2,2,2,2)
+#用ANOSIM进行显著性分析（下例为比较A和B）
+anosim(otu1,group,permutations = 999, distance = "bray")  
+```
+
+##rare plot
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+#biom convert -i otu_table.biom -o otu_table.txt --table-type="OTU table" --to-tsv
+#usearch10 -otutab_norm otu_table.txt -output otu_table_norm.txt
+#usearch10 -alpha_div_rare otu_table_norm.txt -output alpha_rare.txt -method without_replacement
+
+library("ggplot2") # load related packages
+library("reshape2")
+design = read.table("design.txt", header=T, row.names= 1, sep="\t") 
+rare = read.table("alpha_rare.txt", header=T, row.names= 1, sep="\t") 
+
+# 提取样品组信息
+sampFile = as.data.frame(design$genotype,row.names = row.names(design))
+colnames(sampFile)[1] = "group"
+
+# 转换宽表格为ggplot通用长表格格式
+rare$x = rownames(rare) # 添加x轴列
+rare_melt = melt(rare, id.vars=c("x")) # 转换为长表格
+rare_melt$x = factor(rare_melt$x, levels=1:100) # 设置x轴顺序
+
+# 添加分组信息
+rare_melt3 = merge(sampFile,rare_melt, by.x="row.names", by.y="variable")
+rare_melt3$variable=rare_melt3$Row.names
+
+# 按样品分组，按组上色
+p = ggplot(rare_melt3, aes(x = x, y = value, group = variable, color = group )) + 
+  geom_line()+
+  xlab("Rarefraction Percentage")+ylab("Richness (Observed OTUs)")+
+  scale_x_discrete(breaks = c(1:10)*10, labels = c(1:10)*10) + theme_classic()
+p
+
+
+```
+
+##Alpha devirsity
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+
+library("RColorBrewer")
+library("ggplot2")
+library(ggpubr)
+
+alpha = read.table("alpha.txt", header=T, row.names= 1, sep="\t")
+index = cbind(alpha, design[match(rownames(alpha), rownames(design)), ])
+my_comparisons <- list(c("SA", "Mud"), c("SA", "KO"), c("SA", "AM"),c("KO", "AM"),c("Mud", "AM"),c("Mud", "KO"))
+ggboxplot(index,x="Description",y="shannon",color = "Description",palette = "jco")+stat_compare_means(method = "anova",label.y = 8.9)+stat_compare_means(comparisons = my_comparisons,method = "t.test")
+ggboxplot(index,x="Description",y="simpson",color = "Description",palette = "jco")+stat_compare_means(method = "anova",label.y = 0.9945)+stat_compare_means(comparisons = my_comparisons,method = "t.test")
+```
+
+
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+library('DESeq2')
+library('pheatmap')
+library("RColorBrewer")
+library("ggplot2")
+```
+
+
+#Venn plot
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+library('DESeq2')
+library('pheatmap')
+library("RColorBrewer")
+library("ggplot2")
+library(VennDiagram)
+#transfer matrix
+#df1=t(otu_table(ps3))
+OTU.SA = colnames(df1[design2$Description == "SA", apply(df1[design2$Description == "SA",], MARGIN=2, function(x) any(x >50))])
+OTU.Mud = colnames(df1[design2$Description == "Mud", apply(df1[design2$Description == "Mud",], MARGIN=2, function(x) any(x >50))])
+OTU.AM = colnames(df1[design2$Description == "AM", apply(df1[design2$Description == "AM",], MARGIN=2, function(x) any(x >50))])
+OTU.KO = colnames(df1[design2$Description == "KO", apply(df1[design2$Description == "KO",], MARGIN=2, function(x) any(x >50))])
+
+venn.diagram(x=list(SA=OTU.SA,Mud=OTU.Mud,AM=OTU.AM,KO=OTU.KO),,filename = "venn.png",height = 600, width =600,resolution =300, imagetype="png",col="transparent",fill=c("cornflowerblue","forestgreen","gray30","darkorchid1"),cat.col = c("cornflowerblue","forestgreen","gray30","darkorchid1"),alpha = 0.50, cex=0.4, cat.cex=0.45, main.cex  = 0.45)
+
+```
+
+
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+library('DESeq2')
+library('pheatmap')
+library("RColorBrewer")
+library("ggplot2")
+
+library(reshape2)
+library(ggalluvial)
+melt_df = melt(df)
+# 绘制分组对应的分类学
+ggplot(data = melt_df,
+       aes(axis1 = Var1, axis2 = Var2,
+           weight = value)) +
+    scale_x_discrete(limits = c("Var1", "value"), expand = c(.1, .05)) +
+    geom_alluvium(aes(fill = Var1)) +
+    geom_stratum() + geom_text(stat = "stratum", label.strata = TRUE) +
+    theme_minimal() +
+    ggtitle("Phlyum abundance in each group")
+
+# 组间各丰度变化 
+ggplot(data = melt_df,
+       aes(x = variable, weight = value, alluvium = Phylum)) +
+  geom_alluvium(aes(fill = Phylum, colour = Phylum, colour = Phylum),
+                alpha = .75, decreasing = FALSE) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = -30, hjust = 0)) +
+  ggtitle("Phylum change among groups")
+```
+
+
+
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+library('DESeq2')
+library('pheatmap')
+library("RColorBrewer")
+library("ggplot2")
+library(canvasXpress)
+
+canvasXpress(data=x,varAnnot = design2,colorBy="Description",ellipseBy ="Description",graphType = "Scatter3D",title     = "PCA",xAxis     = list("PC1"),yAxis     = list("PC2"),zAxis     = list("PC3"))
+
+
+
+GP = ps1
+wh0 = genefilter_sample(GP, filterfun_sample(function(x) x > 1), A=0.5*nsamples(GP))
+GP1 = prune_taxa(wh0, GP)
+
+
+
+#Transform to even sampling depth.
+GP1 = transform_sample_counts(GP1, function(x) 1E6 * x/sum(x))
+
+phylum.sum = tapply(taxa_sums(GP1), tax_table(GP1)[, "Phylum"], sum, na.rm=TRUE)
+top5phyla = names(sort(phylum.sum, TRUE))[1:5]
+GP1 = prune_taxa((tax_table(GP1)[, "Phylum"] %in% top5phyla), GP1)
+GP.ord <- ordinate(GP1, "NMDS", "bray")
+
+p3 = plot_ordination(GP1, GP.ord, type="biplot", color="Description", shape="Phylum", title="biplot")
+p3
+p4 = plot_ordination(GP1, GP.ord, type="split", color="Phylum", shape="Description", title="split") 
+p4+geom_point(size=4)
+
+
+
+
+## 三元图
+# 定义常用颜色 Defined color with transparent
+alpha = .7
+c_yellow =          rgb(255 / 255, 255 / 255,   0 / 255, alpha)
+c_blue =            rgb(  0 / 255, 000 / 255, 255 / 255, alpha)
+c_orange =          rgb(255 / 255,  69 / 255,   0 / 255, alpha)
+c_green =           rgb(  50/ 255, 220 / 255,  50 / 255, alpha)
+c_dark_green =      rgb( 50 / 255, 200 / 255, 100 / 255, alpha)
+c_very_dark_green = rgb( 50 / 255, 150 / 255, 100 / 255, alpha)
+c_sea_green =       rgb( 46 / 255, 129 / 255,  90 / 255, alpha)
+c_black =           rgb(  0 / 255,   0 / 255,   0 / 255, alpha)
+c_grey =            rgb(180 / 255, 180 / 255,  180 / 255, alpha)
+c_dark_brown =      rgb(101 / 255,  67 / 255,  33 / 255, alpha)
+c_red =             rgb(200 / 255,   0 / 255,   0 / 255, alpha)
+c_dark_red =        rgb(255 / 255, 130 / 255,   0 / 255, alpha)
+
+# 三元图函数，无须理解直接调用即可 Function of ternary plot
+tern_e=function (x, scale = 1, dimnames = NULL, dimnames_position = c("corner",
+                                                                      "edge", "none"), dimnames_color = "black", id = NULL, id_color = "black",
+                 coordinates = FALSE, grid = TRUE, grid_color = "gray", labels = c("inside",
+                                                                                   "outside", "none"), labels_color = "darkgray", border = "black",
+                 bg = "white", pch = 19, cex = 1, prop_size = FALSE, col = "red",
+                 main = "ternary plot", newpage = TRUE, pop = TRUE, ...)
+{
+  labels = match.arg(labels)
+  if (grid == TRUE)
+    grid = "dotted"
+  if (coordinates)
+    id = paste("(", round(x[, 1] * scale, 1), ",", round(x[,
+                                                           2] * scale, 1), ",", round(x[, 3] * scale, 1), ")",
+               sep = "")
+  dimnames_position = match.arg(dimnames_position)
+  if (is.null(dimnames) && dimnames_position != "none")
+    dimnames = colnames(x)
+  if (is.logical(prop_size) && prop_size)
+    prop_size = 3
+  if (ncol(x) != 3)
+    stop("Need a matrix with 3 columns")
+  if (any(x < 0))
+    stop("X must be non-negative")
+  s = rowSums(x)
+  if (any(s <= 0))
+    stop("each row of X must have a positive sum")
+  x = x/s
+  top = sqrt(3)/2
+  if (newpage)
+    grid.newpage()
+  xlim = c(-0.03, 1.03)
+  ylim = c(-1, top)
+  pushViewport(viewport(width = unit(1, "snpc")))
+  if (!is.null(main))
+    grid.text(main, y = 0.9, gp = gpar(fontsize = 18, fontstyle = 1))
+  pushViewport(viewport(width = 0.8, height = 0.8, xscale = xlim,
+                        yscale = ylim, name = "plot"))
+  eps = 0.01
+  grid.polygon(c(0, 0.5, 1), c(0, top, 0), gp = gpar(fill = bg,
+                                                     col = border), ...)
+  if (dimnames_position == "corner") {
+    grid.text(x = c(0, 1, 0.5), y = c(-0.02, -0.02, top +
+                                        0.02), label = dimnames, gp = gpar(fontsize = 12))
+  }
+  if (dimnames_position == "edge") {
+    shift = eps * if (labels == "outside")
+      8
+    else 0
+    grid.text(x = 0.25 - 2 * eps - shift, y = 0.5 * top +
+                shift, label = dimnames[2], rot = 60, gp = gpar(col = dimnames_color))
+    grid.text(x = 0.75 + 3 * eps + shift, y = 0.5 * top +
+                shift, label = dimnames[1], rot = -60, gp = gpar(col = dimnames_color))
+    grid.text(x = 0.5, y = -0.02 - shift, label = dimnames[3],
+              gp = gpar(col = dimnames_color))
+  }
+  if (is.character(grid))
+    for (i in 1:4 * 0.2) {
+      grid.lines(c(1 - i, (1 - i)/2), c(0, 1 - i) * top,
+                 gp = gpar(lty = grid, col = grid_color))
+      grid.lines(c(1 - i, 1 - i + i/2), c(0, i) * top,
+                 gp = gpar(lty = grid, col = grid_color))
+      grid.lines(c(i/2, 1 - i + i/2), c(i, i) * top, gp = gpar(lty = grid,
+                                                               col = grid_color))
+      if (labels == "inside") {
+        grid.text(x = (1 - i) * 3/4 - eps, y = (1 - i)/2 *
+                    top, label = i * scale, gp = gpar(col = labels_color),
+                  rot = 120)
+        grid.text(x = 1 - i + i/4 + eps, y = i/2 * top -
+                    eps, label = (1 - i) * scale, gp = gpar(col = labels_color),
+                  rot = -120)
+        grid.text(x = 0.5, y = i * top + eps, label = i *
+                    scale, gp = gpar(col = labels_color))
+      }
+      if (labels == "outside") {
+        grid.text(x = (1 - i)/2 - 6 * eps, y = (1 - i) *
+                    top, label = (1 - i) * scale, gp = gpar(col = labels_color))
+        grid.text(x = 1 - (1 - i)/2 + 3 * eps, y = (1 -
+                                                      i) * top + 5 * eps, label = i * scale, rot = -120,
+                  gp = gpar(col = labels_color))
+        grid.text(x = i + eps, y = -0.05, label = (1 -
+                                                     i) * scale, vjust = 1, rot = 120, gp = gpar(col = labels_color))
+      }
+    }
+  xp = x[, 2] + x[, 3]/2
+  yp = x[, 3] * top
+  size = unit(if (prop_size)
+    #emiel inserted this code. x are proportions per row.  x*s is original data matrix. s = rowsums of original data matrix (x*s)
+    prop_size * rowSums(x*x*s) / max(  rowSums(x*x*s) )
+    #prop_size * rowSums(    (x*s) * ((x*s)/s)) / max(  rowSums(    (x*s) * ((x*s)/s)) )
+    else cex, "lines")
+  grid.points(xp, yp, pch = pch, gp = gpar(col = col), default.units = "snpc",
+              size = size, ...)
+  if (!is.null(id))
+    grid.text(x = xp, y = unit(yp - 0.015, "snpc") - 0.5 *
+                size, label = as.character(id), gp = gpar(col = id_color,
+                                                          cex = cex))
+  if (pop)
+    popViewport(2)
+  else upViewport(2)
+}
+# merge group to mean
+## 按样品名合并实验组与转置的ko
+mat_t2 = merge(sub_design[c("genotype")], t(norm), by="row.names")[,-1]
+## 按实验设计求组平均值
+mat_mean = aggregate(mat_t2[,-1], by=mat_t2[1], FUN=mean) # mean 
+# 重新转载并去除组名
+per3=t(mat_mean[,-1])
+colnames(per3) = mat_mean$genotype
+per3=as.data.frame(per3[rowSums(per3)>0,]) # remove all 0 ko
+#per3=per3[,tern] # reorder per3 as input
+color=c(c_green,c_orange,c_red,c_grey) 
+
+
+# 两底角相对于顶点显著富集的ko，分共有和特有，类似维恩图
+per3$color=color[4] # set all default # 设置点默认颜色为灰
+AvC = KO_enriched
+BvC = OE_enriched
+C = intersect(row.names(AvC), row.names(BvC))
+A = setdiff(AvC, C) 
+B = setdiff(BvC, C) 
+if (length(A)>0){per3[A,]$color=color[1]} 
+if (length(B)>0){per3[B,]$color=color[2]} 
+if (length(C)>0){per3[C,]$color=color[3]}
+## output pdf and png in 8x8 inches
+per3lg=log2(per3[,1:3]*10000+1) # 对数变换，差ko千分比的差距，点大小更均匀
+pdf(file=paste("KO3_ter_",tern[1],tern[2],tern[3],"venn.pdf", sep=""), height = 8, width = 8)
+tern_e(per3lg[,1:3], prop=T, col=per3$color, grid_color="black", labels_color="transparent", pch=19, main="Tenary Plot")
+dev.off()
+```
+
+
+
+```{r, echo=TRUE,results='hide', message=FALSE, warning=FALSE}
+library(MASS)
+# 读入实验设计
+design = read.table("design.txt", header=T, row.names= 1, sep="\t") 
+# 读取OTU表
+otu_table = read.delim("otu_table.txt", row.names= 1,  header=T, sep="\t")
+# 转换原始数据为百分比
+norm = t(t(otu_table)/colSums(otu_table,na=T)) * 100 # normalization to total 100
+# 按mad值排序取前6波动最大的OTUs
+mad.5 = head(norm[order(apply(norm,1,mad), decreasing=T),],n=6)
+row.names(mad.5)=c("Streptophyta","Rubrivivax","Methylibium","Streptosporangiaceae","Streptomyces","Niastella")
+data=as.data.frame(t(mad.5))
+# 添加分组信息
+data$group=design[row.names(data),]$genotype
+
+
+# 按实验基因组分组排序
+ord <- lda(group ~ ., data)
+
+# 使用ggbiplot展示lda(可选)
+library(ggbiplot)
+ggbiplot(ord, obs.scale = 1, var.scale = 1,
+         groups = data$group, ellipse = TRUE,var.axes = F)
+
+# 展示LDA分析
+library(ggord)
+p <- ggord(ord, data$group, ellipse_pro = 0.68)
+
+get_lda_ell <- function(ord_in, grp_in, ellipse_pro = 0.97){
+  ## adapted from https://github.com/fawda123/ggord/blob/master/R/ggord.R
+  require(plyr)
+  axes = c('LD1', 'LD2')
+  obs <- data.frame(predict(ord_in)$x[, axes])
+  obs$Groups <- grp_in
+  names(obs)[1:2] <- c('one', 'two')
+  theta <- c(seq(-pi, pi, length = 50), seq(pi, -pi, length = 50))
+  circle <- cbind(cos(theta), sin(theta))
+  ell <- ddply(obs, 'Groups', function(x) {
+    if(nrow(x) <= 2) {
+      return(NULL)
+    }
+    sigma <- var(cbind(x$one, x$two))
+    mu <- c(mean(x$one), mean(x$two))
+    ed <- sqrt(qchisq(ellipse_pro, df = 2))
+    data.frame(sweep(circle %*% chol(sigma) * ed, 2, mu, FUN = '+'))
+  })
+  names(ell)[2:3] <- c('one', 'two')
+  ell <- ddply(ell, .(Groups), function(x) x[chull(x$one, x$two), ])
+  ell
+}
+
+# 计算置信椭圆，并添加至原图
+anotherEll <- get_lda_ell(ord, iris$Species, 0.97)
+## Loading required package: plyr
+p + geom_polygon(data = anotherEll, 
+                 aes_string(color = 'Groups', group = 'Groups'),
+                 lty=2, fill = NA)
+
+
+
+
+
+
+
+```
+
+
