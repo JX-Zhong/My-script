@@ -1,5 +1,0 @@
-ssh -X jxzhong@112.49.34.57 -p 10087
-screen -r 
-echo -e "["$(date)"]\tRunning HaplotypeCaller.."
-java -d64 -jar $gatk -T HaplotypeCaller -R $ref -I $opdir/$bn"_recal.bam" -dontUseSoftClippedBases -stand_call_conf 20.0 -stand_emit_conf 20.0 -o $opdir/$bn".vcf" 2>$opdir/$bn.HaplotypeCaller.log
-
