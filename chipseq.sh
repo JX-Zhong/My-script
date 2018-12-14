@@ -31,6 +31,7 @@ inpu_dir=$3
 work_dir=$4	
 threads=$5
 genomeDir="/home/jiaxin/ref/mm10/mm10"
+#genomeDir="/home/jiaxin/ref/Rattus_norvegicus/Ensembl/Rnor_6.0/Sequence/Bowtie2Index/rat6"
 annotation="/home/jiaxin/ref/mm10_refSeq.bed"
 sample_id=${fq1%%.*} 
 
@@ -54,14 +55,16 @@ fastp -i ${inpu_dir}/$fq1 -I ${inpu_dir}/$fq2  -o ${clean_fastq}/$fq1  -O ${clea
 
 
 #Bowtie2 mapping
+#pair ends data bowtie2 -p 6 -3 5  --local -q -x $genomeDir -1 fq1 -2 fq2 
 bowtie2 -p $threads -3 5 --local -x $genomeDir -U ${clean_fastq}/$fq1|samtools sort -O bam -@ $threads -o ${runDir}/${sample_id}/${sample_id}".bam"
 samtools index ${runDir}/${sample_id}/${sample_id}".bam"
 samtools markdup -r ${runDir}/${sample_id}/${sample_id}".bam" ${runDir}/${sample_id}/${sample_id}".markdu.bam"
 samtools index ${runDir}/${sample_id}/${sample_id}".markdu.bam"
 samtools flagstat ${runDir}/${sample_id}/${sample_id}".markdu.bam"  > ${runDir}/${sample_id}/${sample_id}".bam.stat"
+#sambamba markdup --overflow-list-size 600000  -r ${runDir}/${sample_id}/${sample_id}".bam" ${runDir}/${sample_id}/${sample_id}".markdu.bam"
 
-
-#Call peaks by MAC2
+#Call peaks by MAC2 eg. using --broad --nomodel --extsize 200 --broad-cutoff 0.1 when analysis histone -f BAMPE
+#macs2 callpeak -t ChIP.bam -c Control.bam --broad -g hs --broad-cutoff 0.1
 macs2 callpeak -c Control.bam -t ${runDir}/${sample_id}/${sample_id}".markdu.bam" -q 0.01 -f BAM -g mm -n $sample_id --outdir ${runDir}/${sample_id} 2> ${runDir}/${sample_id}/${sample_id}.macs2.log
 
 awk '{print $4"\t"$1"\t"$2"\t"$3"\t+"}' ${runDir}/${sample_id}/${sample_id}"_summits.bed" >${runDir}/${sample_id}/${sample_id}"_summits.homer.tmp"

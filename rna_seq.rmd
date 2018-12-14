@@ -69,7 +69,7 @@ main_theme = theme(panel.background=element_blank(),
 ```{r, warning=FALSE}
 directory='/media/D/16s/16/2018.10.15'
 setwd(directory)
-countData<-read.table('merge.tsv',header = T,stringsAsFactors = F,sep = "\t",row.names = 1)
+countData<-read.table('merge.tsv',header = T,stringsAsFactors = F,sep = "\t",row.names = 1,check.names = F)
 colData=read.table('map.txt',header = T,stringsAsFactors = F,sep = "\t")
 rownames(colData)=colData[,1]
 all(rownames(colData) %in% colnames(countData))
@@ -193,12 +193,32 @@ kk<-enrichKEGG(gene      =gene.df$ENTREZID,
                organism = 'mmu',
                pvalueCutoff = 0.05)
 
+
+#gcSample is a list of diff gene ,using this to plot multigroups dot plot
+# x <- compareCluster(gcSample, 'enrichDO')
+# p <- dotplot(x, showCategory=10)
+
+
 barplot(kk,showCategory = 25, title="The KEGG enrichment analysis of all DEGs")+
     scale_size(range=c(2, 12))+
     scale_x_discrete(labels=function(kk) str_wrap(kk,width = 25))
 dotplot(kk,showCategory = 25, title="The KEGG enrichment analysis of all DEGs")+
     scale_size(range=c(2, 12))+
     scale_x_discrete(labels=function(kk) str_wrap(kk,width = 25))
+
+
+
+# emapplot(ego)
+# cnetplot(ego, categorySize="pvalue", foldChange=geneList)
+# mydf <- data.frame(Entrez=names(geneList), FC=geneList)
+# mydf <- mydf[abs(mydf$FC) > 1,]
+# mydf$group <- "upregulated"
+# mydf$group[mydf$FC < 0] <- "downregulated"
+# mydf$othergroup <- "A"
+# mydf$othergroup[abs(mydf$FC) > 2] <- "B"
+# 
+# formula_res <- compareCluster(Entrez~group+othergroup, data=mydf, fun="enrichKEGG")
+# dotplot(formula_res, x=~group) + ggplot2::facet_grid(~othergroup)
 ```
 
 

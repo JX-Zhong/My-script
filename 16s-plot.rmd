@@ -61,6 +61,14 @@ main_theme = theme(panel.background=element_blank(),
                     legend.key=element_blank(),
                     legend.text= element_text(size=7),
                     text=element_text(family="sans", size=7))
+
+library(RColorBrewer)
+palette1=brewer.pal(9,"Set1")
+palette2=brewer.pal(8,"Set2")
+palette3=brewer.pal(12,"Set3")
+big_palette=c(palette1,palette2,palette3)
+#p+scale_fill_manual(values = sample(big_palette))
+
 ```
 
 ##Step1. importint biom and tree from output of Vsearch and Qiime
@@ -101,7 +109,7 @@ prevdf = data.frame(Prevalence = prevdf,TotalAbundance = taxa_sums(ps0),tax_tabl
 #Compute the total and average prevalences of the features in each phylum. 
 plyr::ddply(prevdf, "Phylum", function(df1){cbind(mean(df1$Prevalence),sum(df1$Prevalence))})
 # Define phyla to filter 
-filterPhyla = c("p__WS3", "p__Synergistetes","p__[Thermi]","p__Chlamydiae","p__Chlorobi","p__Verrucomicrobia","p__TM7") filterPhyla = c
+filterPhyla = c("p__WS3", "p__Synergistetes","p__[Thermi]","p__Chlamydiae","p__Chlorobi","p__Verrucomicrobia","p__TM7")
 # Filter entries with unidentified Phylum. 
 ps1 = subset_taxa(ps0, !Phylum %in% filterPhyla);ps1
 # Subset to the remaining phyla

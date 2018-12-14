@@ -126,4 +126,42 @@ if (TRUE){
   print(paste("The output figure is ", opts$output, ".pdf",  sep = ""))
 
 
+#ggargnger
+library(egg)
+ 
+p=ggplot(indicator_data,aes(0.1,indicator_data$Indicator))+geom_point(aes(size=indicator_data$Relative_abundance,color=indicator_data$Group))+theme_bw()+theme(axis.ticks = element_blank())+theme(axis.text.x = element_blank())+theme(axis.text.y = element_blank())+labs(x = "", y = "", title = "") 
+q=ggplot(indicator_data,aes(y=indicator_data$Relative_abundance,x=indicator_data$Indicator))+geom_bar(stat = "identity",fill="#56B4E9")+coord_flip()+theme_bw()+theme(axis.ticks = element_blank())
 
+ggarrange(q,p,widths = c(2,1))
+
+
+#inset figures
+theme_set(theme_gray() +
+				              theme(
+				                  axis.line = element_line(size=0.5),
+				                  panel.background = element_rect(fill=NA,size=rel(20)),
+				                  panel.grid.minor = element_line(colour = NA),
+				                  axis.text = element_text(size=16),
+				                  axis.title = element_text(size=18)
+				                  )
+				          )
+
+				big_plot <-  ggplot(my_data, aes(x=size,fill=type)) +
+				    geom_bar(binwidth=100) +
+				    guides(fill=FALSE) +
+				    scale_y_continuous(expand=c(0,0)) # Move bars down to X-axis
+
+				big_plot
+
+				small_plot <- ggplot(my_data, aes(x=size,fill=type)) + geom_bar(binwidth=5) + xlim(0,500) + theme(axis.title=element_blank()) +  scale_y_continuous(expand=c(0,0))
+				small_plot
+
+				# Where to put the smaller plot:
+				library(grid)
+				vp <- viewport(width = 0.8, height = 0.7, x = 0.65, y = 0.65)
+				                # width, height, x-position, y-position of the smaller plot
+
+				png("Lesson-07/inset_plot.png")
+				print(big_plot)
+				print(small_plot, vp = vp)
+				dev.off()

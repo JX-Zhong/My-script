@@ -4,10 +4,50 @@ qiime tools import --input-path rep_seqs.fa --type 'FeatureData[Sequence]' --out
 qiime tools import --input-path rep_seqs.tree --type 'Phylogeny[Unrooted]' --output-path qiime2/unrooted-tree.qza
 
 
-qiime tools import   --type 'SampleData[PairedEndSequencesWithQuality]'   --input-path manifest.csv  --output-path paired-end-demux.qza   --source-format PairedEndFastqManifestPhred33
+qiime tools import   --type 'SampleData[PairedEndSequencesWithQuality]'   \
+--input-path manifest.csv  \
+--output-path paired-end-demux.qza   \
+--source-format PairedEndFastqManifestPhred33
 
-qiime dada2 denoise-paired   --i-demultiplexed-seqs paired-end-demux.qza --o-table fastq/table.qza --o-representative-sequences fastq/rep-seqs.qza --p-trunc-len-f 180 --p-trunc-len-r 180 --o-denoising-stats fastq/stats-dada2.qza --p-n-reads-learn 15 --verbose
-qiime dada2 denoise-single --i-demultiplexed-seqs single-end-demux.qza --p-trunc-len 380 --o-table table.qza --o-representative-sequences rep-seqs.qza --o-denoising-stats stats-dada2.qza --verbose --p-n-threads 48
+#注意：需要20bp以上的overlap才能使用dada2拼接，否则会报错。
+qiime dada2 denoise-paired  \
+ --i-demultiplexed-seqs paired-end-demux.qza \
+ --o-table fastq/table.qza \
+ --o-representative-sequences fastq/rep-seqs.qza \
+ --p-trim-left-f 0 \
+ --p-trim-left-r 0 \
+ --p-trunc-len-f 180 \
+ --p-trunc-len-r 180 \
+ --o-denoising-stats denoising-stats-dada2.qza \
+ --p-n-reads-learn 15 --verbose
+
+qiime metadata tabulate \
+  --m-input-file denoising-stats-dada2.qza \
+  --o-visualization denoising-stats.qzv
+
+
+
+
+# qiime dada2 denoise-single --i-demultiplexed-seqs single-end-demux.qza --p-trunc-len 380 --o-table table.qza --o-representative-sequences rep-seqs.qza --o-denoising-stats stats-dada2.qza --verbose --p-n-threads 48
+
+qiime feature-table summarize \
+  --i-table table.qza \
+  --o-visualization table.qzv \
+  --m-sample-metadata-file sample-metadata.txt
+
+qiime feature-table tabulate-seqs \
+  --i-data rep-seqs.qza \
+  --o-visualization rep-seqs.qzv
+
+
+#建树用于多样性分析
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs.qza \
+  --o-alignment aligned-rep-seqs.qza \
+  --o-masked-alignment masked-aligned-rep-seqs.qza \
+  --o-tree unrooted-tree.qza \
+  --o-rooted-tree rooted-tree.qza
+
 
 #Export data
 qiime tools export \
@@ -19,29 +59,80 @@ qiime tools export \
   --output-dir exported-tree
 
 
-qiime diversity core-metrics-phylogenetic   --i-phylogeny rooted-tree.qza   --i-table table.qza   --p-sampling-depth 35000 --m-metadata-file map.txt  --output-dir core-metrics-results
+qiime diversity core-metrics-phylogenetic  \
+--i-phylogeny rooted-tree.qza  \
+--i-table table.qza  \
+--p-sampling-depth 35000 \
+--m-metadata-file map.txt \
+--output-dir core-metrics-results
 
 qiime diversity alpha-group-significance   --i-alpha-diversity core-metrics-results/faith_pd_vector.qza   --m-metadata-file map.txt   --o-visualization core-metrics-results/faith-pd-group-significance.qzv
 #Alpha diversity plot 
 qiime diversity alpha-group-significance   --i-alpha-diversity core-metrics-results/evenness_vector.qza   --m-metadata-file map.txt --o-visualization core-metrics-results/evenness-group-significance.qzv
 
 
+
+#rarefaction 
+qiime diversity alpha-rarefaction \
+  --i-table table.qza \
+  --i-phylogeny rooted-tree.qza \
+  --p-max-depth 55000 \
+  --m-metadata-file sample-metadata.txt \
+  --o-visualization alpha-rarefaction.qzv
 #beta diversity plot
 
-qiime diversity beta-group-significance   --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza   --m-metadata-file map.txt  --m-metadata-column Description  --o-visualization core-metrics-results/unweighted-unifrac-body-site-significance.qzv   --p-pairwise
+qiime diversity beta-group-significance   \
+--i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file map.txt  \
+  --m-metadata-column Description  \
+  --o-visualization core-metrics-results/unweighted-unifrac-body-site-significance.qzv  \
+ --p-pairwise
 
 qiime emperor plot   --i-pcoa core-metrics-results/unweighted_unifrac_pcoa_results.qza   --m-metadata-file map.txt  --o-visualization core-metrics-results/unweighted-unifrac-emperor-DaysSinceExperimentStart.qzv
 
 
 
-qiime feature-classifier classify-sklearn --i-classifier gg-13-8-99-515-806-nb-classifier.qza --i-reads sequences.qza --o-classification taxonomy.qza
+#训练分类器,使用rep_set文件中的99_otus.fasta数据和taxonomy中的99_OTU_taxonomy.txt数据
 
+#Note: the classifier has already been trained for you ,the V4 region, bound by the 515F/806R primer pair 
+qiime feature-classifier classify-sklearn \
+ --i-classifier gg-13-8-99-515-806-nb-classifier.qza \
+  --i-reads rep-seqs.qza \
+  --o-classification taxonomy.qza
+
+
+# 导入参考序列
+qiime tools import \
+  --type 'FeatureData[Sequence]' \
+  --input-path 99_otus.fasta \
+  --output-path 99_otus.qza
+# 导入物种分类信息
+qiime tools import \
+  --type 'FeatureData[Taxonomy]' \
+  --input-format HeaderlessTSVTaxonomyFormat \
+  --input-path 99_otu_taxonomy.txt \
+  --output-path ref-taxonomy.qza
+
+# Extract reference reads
+qiime feature-classifier extract-reads \
+  --i-sequences 99_otus.qza \
+  --p-f-primer CCTACGGGNGGCWGCAG \      #341F引物
+  --p-r-primer GACTACHVGGGTATCTAATCC \  #805R引物
+  --o-reads ref-seqs.qza
+# Train the classifier（训练分类器）
+qiime feature-classifier fit-classifier-naive-bayes \
+  --i-reference-reads ref-seqs.qza \
+  --i-reference-taxonomy ref-taxonomy.qza \
+  --o-classifier Greengenes_13_8_99%_OTUs_341F-805R_classifier.qza
 
 
 qiime metadata tabulate   --m-input-file taxonomy.qza   --o-visualization taxonomy.qzv
 
 
-qiime taxa barplot   --i-table table.qza   --i-taxonomy taxonomy.qza   --m-metadata-file map.txt  --o-visualization taxa-bar-plots.qzv
+qiime taxa barplot   --i-table table.qza  \
+ --i-taxonomy taxonomy.qza   \
+ --m-metadata-file map.txt  \
+ --o-visualization taxa-bar-plots.qzv
 
 ##Differential abundance testing with ANCOM
 
@@ -54,4 +145,51 @@ qiime taxa collapse   --i-table table.qza --i-taxonomy taxonomy.qza  --p-level 4
 qiime composition add-pseudocount   --i-table gut-table-l4.qza   --o-composition-table comp-gut-table-l4.qza
 qiime composition ancom   --i-table comp-gut-table-l4.qza   --m-metadata-file map.txt  --m-metadata-column Description   --o-visualization l4-ancom-Subject.qzv
 
-for i in `ls S*.vcf`
+
+
+#Practicum: gneiss Analysis ,ilr and Balance Trees ,Like ANCOM, gneiss uses logs, so requires a pseudocount 
+qiime gneiss add-pseudocount \
+                --i-table table.qza \
+                --p-pseudocount 1 \
+                --o-composition-table composition.qza
+
+
+qiime gneiss correlation-clustering \
+               --i-table composition.qza \
+                --o-clustering hierarchy.qza  
+
+
+qiime gneiss dendrogram-heatmap \
+               --i-table composition.qza \
+                --i-tree hierarchy.qza \
+               --m-metadata-file sample-metadata.tsv \
+                --m-metadata-column BodySite \
+                --p-color-map seismic \
+               --o-visualization tree_heatmap_by_bodysite.qzv
+
+#Calculate the ilrtransforms 
+qiime gneiss ilr-transform \
+         --i-table composition.qza \
+          --i-tree hierarchy.qza \
+           --o-balances balances.qza
+
+
+#Fit the linear regression model ,As this is a time-course, could instead uselme-regressiongrouped by Subject 
+qiime gneiss ols-regression \
+         --p-formula "Subject+BodySite+DaysSinceExperimentStart" \
+          --i-table balances.qza \
+           --i-tree hierarchy.qza \
+            --m-metadata-file sample-metadata.tsv \
+             --o-visualization regression_summary.qzv
+
+
+#Well, great, but we seem to have strayed a long way from actual taxa
+qiime gneiss balance-taxonomy \
+         --i-table composition.qza \
+          --i-tree hierarchy.qza \
+           --i-taxonomy taxonomy.qza \
+            --p-taxa-level 2 \
+             --p-balance-name 'y0' \
+              --m-metadata-file sample-metadata.tsv \
+               --m-metadata-column BodySite \
+                --o-visualization y0_taxa_summary.qzv

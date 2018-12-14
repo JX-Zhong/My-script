@@ -29,7 +29,7 @@ awk '!a[$5 $6]++' H358.filter1.maf>abc.maf
 
 
 awk -F "\t" '{OFS="\t";$16=$17="H358";print}' cbc.maf >H358.maf
-
+awk 'split($16,myarray,"."){OFS="\t";$16=$17=myarray[1];print}' final.maf >final1.maf
 
 sed '1,32d' SRR*.dp.filter.vcf.maf >>a.maf
 

@@ -1,0 +1,89 @@
+##KRONA  --------ktImportText KRONA
+
+##Qｉｉｍｅ
+1. rank abundance plot
+ plot_rank_abundance_graph.py -i otu_table_non_chimeric_final.biom -s '*' -o ppp2.pdf -x -v -n
+
+2.filter_otus_from_otu_table.py------挑选丰度>1‰的OTU
+
+  filter_fasta.py------获得丰度>1‰OTU的fasta文件
+
+  make_phylogeny.py-------构建系统树
+
+  ggtree.R------系统树可视化
+filter fraction>0.001
+
+filter_otus_from_otu_table.py -i otu_table_non_chimeric_final.biom -o filter_table.biom --min_count_fraction 0.001
+
+biom convert -i filter_table.biom -o otu_table_tfilter.txt --to-tsv --header-key taxonomy --output-metadata-id "ConesensusLinneage" --table-type="OTU table"
+
+filter_fasta.py -f non_chimeric_rep_set_aligned_pfiltered.fasta -o bio_filtered_seqs.fastq -b otu_table_tfilter.txt
+filter_fasta.py -f non_chimeric_rep_set_aligned_pfiltered.fasta -o bio_filtered_seqs.fastq -b list
+
+make_phylogeny.py -i bio_filtered_seqs.fastq -o filter.tre
+
+make_otu_heatmap.py -i filter_table.biom -o heatmap2.pdf -m map.txt -c Location -t filter.tre --color_scheme autumn --obs_md_level 5
+
+upgma_cluster.py -i weighted_unifrac_dm.txt -o upga_cluster.tre
+制作聚类树 然后可以进入itol完善图片
+
+３．#This script creates boxplots that allow for the comparison between different categories found within the mapping file. The boxplots that are created compare distances within all samples of a field value, as well as between different field values. Individual within and between distances are also plotted.
+
+make_distance_boxplots.py -m map.txt -o plot2/ -d weighted_unifrac_dm.txt -f "Location"
+# make distance plot T-test
+
+make_distance_boxplots.py -m map.txt -o plot3/ -d unweighted_unifrac_dm.txt -f "Location" --color_individual_within_by_field "Location" --y_max 2 --suppress_individual_between
+
+ ４．＃2D pcoa
+
+make_2d_plots.py -i unweighted_unifrac_pc.txt -m map.txt -o 2dplot1/ --ellipsoid_opacity 1
+
+５．Network
+make_bipartite_network.py -i otu_table_non_chimeric_final.biom -m map.txt -k taxonomy --md_fields 'k,p,c,o,f' -o bipartite_network/ --scolors 'Location' --ocolors 'f' --osize 'Abundance'
+
+make_otu_network.py -i otu_table_non_chimeric_final.biom -m map.txt -o otu/
+
+- 过滤数据
+
+filter_samples_from_otu_table.py -i otu_table_non_chimeric_final.biom -o filter_otu_tablee.biom --sample_id_fp list
+根据list中的样本 对biom文件进行过滤 筛选需要的sample
+
+filter_otus_from_otu_table.py -i filter_otu_WD.biom -o filter_otu.biom -e list2 --negate_ids_to_exclude
+根据指定的otu从biom文件中提取出来，otu可以是筛选好的有差异的otu
+
+filter_otus_from_otu_table.py -i filter_otu.biom -o closed_otu_table.biom -e /home/jiaxin/gg_13_5_otus/rep_set/97_otus.fasta --negate_ids_to_exclude
+筛除数据库钟未收录的otu
+biom convert -i closed_otu_table.biom -o closed_otu_table.biom.json --to-json
+转换格shi
+
+７．PICRUST
+normalize_by_copy_number.py -i $outdir/new_otu_table.biom -o $outdir/normalized_otus.biom
+
+predict_metagenomes.py -f -i $outdir/normalized_otus.biom -o $outdir/predictions_kegg.tab
+
+predict_metagenomes.py -f --type_of_prediction cog -i $outdir/normalized_otus.biom -o $outdir/predictions_cog.tab
+
+categorize_by_function.py -i metagenome_predictions.biom -c KEGG_Pathways -l 3 -o predicted_metagenomes.L3.tab -f
+
+categorize_by_function.py -i metagenome_predictions.biom -c "KEGG_Pathways" -l 2 -o metagenome_at_level2.biom
+
+Then add the following lines to a qiime parameter file (e.g. qiime_params.txt) ensuring that the level you collapsed at is the same in your config file
+
+summarize_taxa:md_identifier "KEGG_Pathways"
+summarize_taxa:absolute_abundance True
+summarize_taxa:level 2
+
+summarize_taxa_through_plots.py -i metagenome_at_level2.biom -p qiime_params.txt -o plots_at_level2
+
+8.最重要的分析※
+core_diversity_analyses.py -i otu_table_non_chimeric_final.biom -o core4w1/ -m map.txt -t rep_set_no_chimeric.tre -e 40000 -p alpha_params.txt
+
+biom convert -i otus/otu_table.biom -o otu_table_taxonomy.txt --to-tsv --header-key taxonomy --output-metadata-id "ConesensusLinneage" --table-type="OTU table"
+
+
+
+python format_input.py test/clean_otu_table_L4.txt table_L4.in -c 2 -s 1 -o 1000000
+python run_lefse.py table_L4.in test/table_L4.res -l 3.5
+python plot_res.py test/table_L5.res res.pdf --dpi 900 --format pdf
+
+python plot_cladogram.py test/table_L5.res cladogram.pdf --dpi 900 --format pdf --class_legend_font_size 6 --label_font_size 5

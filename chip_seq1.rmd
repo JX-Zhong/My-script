@@ -1,5 +1,5 @@
 ---
-title: "Chip-seq"
+title: "pnas"
 author: "zhong"
 date: "2018年10月13日"
 output: pdf_document
@@ -16,6 +16,7 @@ txdb <- TxDb.Mmusculus.UCSC.mm10.knownGene
 library("clusterProfiler")
 library("ReactomePA")
 library("DOSE")
+library(dplyr)
 library(ggplot2)
 ```
 
@@ -47,51 +48,31 @@ main_theme = theme(panel.background=element_blank(),
 
 ```{r, echo=FALSE}
 setwd("/home/zhong/mac")
-peak_1 <- readPeakFile("summits.bed")
-peak_2 <- readPeakFile("summits.bed")
-peak_3 <- readPeakFile("summits.bed")
-peak_1_narrow <- readPeakFile("summits.narrowpeak")
-peak_2_narrow <- readPeakFile("summits.narrowpeak")
-peak_3_narrow <- readPeakFile("summits.narrowpeak")
+ring1B <- readPeakFile("ring1B/ring1B_summits.bed")
+suz=readPeakFile("suz/suz_summits.bed")
+
+
 
 #ChIP peaks coverage plot
 #Showing the peak locations over the whole genome
-
-
-
-
-
-peaks=GenomicRanges::GRangesList(iol=peak1,opc=peak2)
-covplot(peaks,weightCol = 5)
-col <- c(iol='#FD9145', opc='#03AFD8')
-p <- covplot(peaks)
-p + facet_grid(chr ~ .id) + scale_color_manual(values=col) + scale_fill_manual(values=col)
+covplot(peak, weightCol="V5")
 #Heatmap of ChIP binding to TSS regions
-peaks <-list(peak_1=peak_1,peak_2=peak_2,peak_3=peak_3)
 promoter <- getPromoters(TxDb=txdb, upstream=3000, downstream=3000)
-tagMatrixList <- lapply(peaks, getTagMatrix, windows=promoter)
-plotAvgProf(tagMatrixList, xlim=c(-3000, 3000))
-plotAvgProf(tagMatrixList, xlim=c(-3000, 3000),resample=500, facet="row")
-tagHeatmap(tagMatrixList, xlim=c(-3000, 3000), color=NULL)
-
-
-#Select only one peak to display
-promoter <- getPromoters(TxDb=txdb, upstream=3000, downstream=3000)
-tagMatrix <- getTagMatrix(peak_1, windows=promoter)
+tagMatrix <- getTagMatrix(ring1B, windows=promoter)
 tagHeatmap(tagMatrix, xlim=c(-3000, 3000), color="red")
 
 #Average Profile of ChIP peaks binding to TSS region
 plotAvgProf(tagMatrix, xlim=c(-3000, 3000), resample = 1000)
 
-peak_1_peakAnno<-annotatePeak(peak_1,tssRegion = c(-2500, 2500), TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, annoDb="org.Mm.eg.db")
-peak_2_peakAnno=annotatePeak(peak_2,tssRegion = c(-2500, 2500), TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, annoDb="org.Mm.eg.db")
-peak_3_peakAnno<-annotatePeak(peak_3,tssRegion = c(-2500, 2500), TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, annoDb="org.Mm.eg.db")
+ringb1_peakAnno<-annotatePeak(ring1B,tssRegion = c(-2500, 2500), TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, annoDb="org.Mm.eg.db")
+suz12_peakAnno=annotatePeak(suz,tssRegion = c(-2500, 2500), TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, annoDb="org.Mm.eg.db")
+suz12_peakAnno<-annotatePeak(suz,tssRegion = c(-2500, 2500), TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, annoDb="org.Mm.eg.db")
 
 
-
+peaks <-list(ring1B=ring1B,suz=suz)
 peakAnnoList <- lapply(peaks, annotatePeak, tssRegion=c(-2500,2500), TxDb=txdb, 
                        addFlankGeneInfo=TRUE, flankDistance=5000)
-names(peakAnnoList)=c("peak_1","peak_2")
+names(peakAnnoList)=c("ring1B","suz")
 plotDistToTSS(peakAnnoList)
 #可视化 Pie and Bar plot
 plotAnnoBar(peakAnnoList)
@@ -109,7 +90,7 @@ plotAvgProf(tagMatrixList, xlim=c(-3000, 3000),resample=500, facet="row")
 tagHeatmap(tagMatrixList, xlim=c(-3000, 3000), color=NULL)
 
 
-over_lap<-findOverlapsOfPeaks(peak_1,peak_2,peak_3)
+over_lap<-findOverlapsOfPeaks(1,2,3,4)
 png('overlapVenn.png')
 makeVennDiagram(over_lap)
 dev.off()
@@ -117,11 +98,11 @@ dev.off()
 
 genes= lapply(peakAnnoList, function(i) as.data.frame(i)$geneId)
 #venn.diagram(genes, imagetype = "png", fill = c("blue", "green"), alpha = c(0.5, 0.5)  ,filename = "venn.png")
-upset(fromList(genes))
+
 
 #Functional enrichment analysis
 # Multiple samples KEGG analysis
-compKEGG <- compareCluster(geneCluster = genes, 
+compKEGG <- compareCluster(geneCluster = gene, 
                          fun = "enrichKEGG",
                          organism = "mouse",
                          pvalueCutoff  = 0.05, 
@@ -137,13 +118,13 @@ dotplot(compKEGG, showCategory = 20, title = "KEGG Pathway Enrichment Analysis")
 #样本共有的靶基因在TSS附近的profile图
 common_gene <- Reduce(intersect,genes)
 #fourgenes <- intersect(genes[[1]],intersect(genes[[2]],intersect(genes[[3]],genes[[4]])))
-peak_1=as.data.frame(peak_1_peakAnno)$geneId
-peak_2=as.data.frame(peak_212_peakAnno)$geneId
-peak_1_df <- as.data.frame(peak_1_peakAnno) 
-peak_1_peak <- GRanges(peak_1_df[peak_1_df$geneId %in% common_gene, 1:12])
-peak_2_df <- as.data.frame(peak_212_peakAnno)
-peak_2_peak <- GRanges(peak_212_df[peak_2_df$geneId %in% common_gene, 1:12])
-list_peak <- list(peak_1=peak_1_peak, peak_2=peak_2_peak) 
+ring1B=as.data.frame(ring1B_peakAnno)$geneId
+suz12=as.data.frame(suz12_peakAnno)$geneId
+ring1B_df <- as.data.frame(ring1B_peakAnno) 
+ring1B_peak <- GRanges(ring1B_df[ring1B_df$geneId %in% common_gene, 1:12])
+suz12_df <- as.data.frame(suz12_peakAnno)
+suz12_peak <- GRanges(suz12_df[suz12_df$geneId %in% common_gene, 1:12])
+list_peak <- list(ring1B=ring1B_peak, suz12=suz12_peak) 
 
 
 
@@ -151,7 +132,7 @@ tagMatrixList <- lapply(list_peak, getTagMatrix, window=promoter)
 plotAvgProf(tagMatrixList , xlim = c(-3000,3000))
 
 
-
+upset(fromList(genes))
 
 ```
 
